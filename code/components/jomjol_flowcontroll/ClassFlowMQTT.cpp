@@ -273,6 +273,12 @@ bool ClassFlowMQTT::doFlow(string zwtime)
 
     success = publishSystemData(qos);
 
+    // Publish meter image URL for HA image entity
+    if (getMQTTisConnected()) {
+        std::string imageUrl = "http://" + *getIPAddress() + "/img_tmp/alg_roi.jpg";
+        success |= MQTTPublish(maintopic + "/image_url", imageUrl, qos, SetRetainFlag);
+    }
+
     if (flowpostprocessing && getMQTTisConnected())
     {
         std::vector<NumberPost*>* NUMBERS = flowpostprocessing->GetNumbers();
@@ -332,6 +338,24 @@ bool ClassFlowMQTT::doFlow(string zwtime)
 
             std::string json = flowpostprocessing->getJsonFromNumber(i, "\n");
             success |= MQTTPublish(namenumber + "json", json, qos, SetRetainFlag);
+
+            // Publish individual digit ROI values
+            if ((*NUMBERS)[i]->digit_roi) {
+                for (int d = 0; d < (*NUMBERS)[i]->digit_roi->ROI.size(); ++d) {
+                    std::string roiName = (*NUMBERS)[i]->digit_roi->ROI[d]->name;
+                    std::string roiValue = to_string((*NUMBERS)[i]->digit_roi->ROI[d]->result_float);
+                    success |= MQTTPublish(namenumber + roiName, roiValue, qos, SetRetainFlag);
+                }
+            }
+
+            // Publish individual analog ROI values
+            if ((*NUMBERS)[i]->analog_roi) {
+                for (int a = 0; a < (*NUMBERS)[i]->analog_roi->ROI.size(); ++a) {
+                    std::string roiName = (*NUMBERS)[i]->analog_roi->ROI[a]->name;
+                    std::string roiValue = to_string((*NUMBERS)[i]->analog_roi->ROI[a]->result_float);
+                    success |= MQTTPublish(namenumber + roiName, roiValue, qos, SetRetainFlag);
+                }
+            }
         }
     }
     

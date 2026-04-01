@@ -42,7 +42,36 @@
   <img src="images/icon/watermeter.svg" width="150px">
 </p>
 
-Artificial intelligence is everywhere, from speech to image recognition. While most AI systems rely on powerful processors or cloud computing, **edge computing** brings AI closer to the end user by utilizing the capabilities of modern processors.  
+> **This is a fork of [jomjol/AI-on-the-edge-device](https://github.com/jomjol/AI-on-the-edge-device)** with the following enhancements:
+>
+> ### Changes in this fork
+>
+> **1. Individual Digit & Analog ROI values via MQTT and JSON**
+> - The JSON output (`/json`) now includes `dig` and `ana` objects with all individual ROI values (e.g. `dig0`, `dig1`, `ana1`, `ana2`, etc.)
+> - Each ROI gets its own MQTT topic (e.g. `watermeter/main/dig0`, `watermeter/main/ana3`)
+> - Home Assistant Discovery automatically registers sensors for all individual ROIs
+>
+> **2. Bug Fix: MaxRateValue ignores AnalogToDigitTransitionStart (Issue [#712](https://github.com/jomjol/AI-on-the-edge-device/issues/712), [#2903](https://github.com/jomjol/AI-on-the-edge-device/issues/2903), [#659](https://github.com/jomjol/AI-on-the-edge-device/issues/659))**
+> - Legitimate single-digit rollovers (+1.0) are no longer rejected as "Rate too high" when the analog pointer confirms the transition (value >= `AnalogToDigitTransitionStart`)
+> - This prevents the meter from freezing for extended periods during normal digit rollovers
+>
+> **3. Meter Image as Home Assistant Entity**
+> - The meter image (`alg_roi.jpg`) is published as an HA MQTT image entity after each digitization round
+> - Automatically visible as `image.watermeter_meter_image` in Home Assistant
+>
+> **4. Set PreValue from Home Assistant**
+> - A number entity (`number.watermeter_set_prevalue`) is registered via MQTT Discovery
+> - Allows setting the PreValue directly from the HA UI (uses the existing `ctrl/set_prevalue` MQTT handler)
+>
+> **5. Additional Bug Fixes**
+> - Fixed: "Neg. Rate" error message was missing the actual read value (undefined variable `zwvalue`)
+> - Fixed: `checkDigitConsistency()` could crash with `log10(0)` when input value was zero or negative
+>
+> All other functionality remains identical to the upstream project.
+
+---
+
+Artificial intelligence is everywhere, from speech to image recognition. While most AI systems rely on powerful processors or cloud computing, **edge computing** brings AI closer to the end user by utilizing the capabilities of modern processors.
 This project demonstrates edge computing using the **ESP32**, a low-cost, AI-capable device, to digitize your analog meters—whether water, gas, or electricity. With affordable hardware and simple instructions, you can turn any standard meter into a smart device.
 
 Let's explore how to make **AI on the Edge** a reality! 🌟

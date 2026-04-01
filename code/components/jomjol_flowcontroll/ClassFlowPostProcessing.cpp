@@ -71,7 +71,34 @@ string ClassFlowPostProcessing::getJsonFromNumber(int i, std::string _lineend) {
         json += "    \"rate\": \"\"," + _lineend;
     }
 
-    json += "    \"timestamp\": \"" + NUMBERS[i]->timeStamp + "\"" + _lineend;
+    json += "    \"timestamp\": \"" + NUMBERS[i]->timeStamp + "\"," + _lineend;
+
+    // Individual digit ROI values
+    json += "    \"dig\": {" + _lineend;
+    if (NUMBERS[i]->digit_roi) {
+        for (int d = 0; d < NUMBERS[i]->digit_roi->ROI.size(); ++d) {
+            json += "      \"" + NUMBERS[i]->digit_roi->ROI[d]->name + "\": " + to_string(NUMBERS[i]->digit_roi->ROI[d]->result_float);
+            if (d < NUMBERS[i]->digit_roi->ROI.size() - 1) {
+                json += ",";
+            }
+            json += _lineend;
+        }
+    }
+    json += "    }," + _lineend;
+
+    // Individual analog ROI values
+    json += "    \"ana\": {" + _lineend;
+    if (NUMBERS[i]->analog_roi) {
+        for (int a = 0; a < NUMBERS[i]->analog_roi->ROI.size(); ++a) {
+            json += "      \"" + NUMBERS[i]->analog_roi->ROI[a]->name + "\": " + to_string(NUMBERS[i]->analog_roi->ROI[a]->result_float);
+            if (a < NUMBERS[i]->analog_roi->ROI.size() - 1) {
+                json += ",";
+            }
+            json += _lineend;
+        }
+    }
+    json += "    }" + _lineend;
+
     json += "  }" + _lineend;
 
     return json;
@@ -914,7 +941,7 @@ bool ClassFlowPostProcessing::doFlow(string zwtime) {
                                                     + ", preToll=" + std::to_string(NUMBERS[j]->PreValue-(2/pow(10, NUMBERS[j]->Nachkomma))));
                     } 
 
-                    NUMBERS[j]->ErrorMessageText = NUMBERS[j]->ErrorMessageText + "Neg. Rate - Read: " + zwvalue + " - Raw: " + NUMBERS[j]->ReturnRawValue + " - Pre: " + RundeOutput(NUMBERS[j]->PreValue, NUMBERS[j]->Nachkomma) + " "; 
+                    NUMBERS[j]->ErrorMessageText = NUMBERS[j]->ErrorMessageText + "Neg. Rate - Read: " + RundeOutput(NUMBERS[j]->Value, NUMBERS[j]->Nachkomma) + " - Raw: " + NUMBERS[j]->ReturnRawValue + " - Pre: " + RundeOutput(NUMBERS[j]->PreValue, NUMBERS[j]->Nachkomma) + " "; 
                     NUMBERS[j]->Value = NUMBERS[j]->PreValue;
                     NUMBERS[j]->ReturnValue = "";
                     NUMBERS[j]->timeStampLastValue = imagetime;
@@ -950,16 +977,33 @@ bool ClassFlowPostProcessing::doFlow(string zwtime) {
                 }
 
                 if (abs(_ratedifference) > abs(NUMBERS[j]->MaxRateValue)) {
-                    NUMBERS[j]->ErrorMessageText = NUMBERS[j]->ErrorMessageText + "Rate too high - Read: " + RundeOutput(NUMBERS[j]->Value, NUMBERS[j]->Nachkomma) + " - Pre: " + RundeOutput(NUMBERS[j]->PreValue, NUMBERS[j]->Nachkomma) + " - Rate: " + RundeOutput(_ratedifference, NUMBERS[j]->Nachkomma);
-                    NUMBERS[j]->Value = NUMBERS[j]->PreValue;
-                    NUMBERS[j]->ReturnValue = "";
-                    NUMBERS[j]->ReturnRateValue = "";
-                    NUMBERS[j]->timeStampLastValue = imagetime;
+                    // Check if this is a legitimate single-digit rollover confirmed by the analog pointer
+                    double _valueDiff = NUMBERS[j]->Value - NUMBERS[j]->PreValue;
+                    bool isDigitRollover = (_valueDiff >= 0.8 && _valueDiff <= 1.2);
+                    bool analogConfirmsRollover = (NUMBERS[j]->analog_roi != NULL &&
+                                                   NUMBERS[j]->analog_roi->ROI.size() > 0 &&
+                                                   NUMBERS[j]->AnalogToDigitTransitionStart > 0 &&
+                                                   NUMBERS[j]->analog_roi->ROI[0]->result_float >= NUMBERS[j]->AnalogToDigitTransitionStart);
 
-                    string _zw = NUMBERS[j]->name + ": Raw: " + NUMBERS[j]->ReturnRawValue + ", Value: " + NUMBERS[j]->ReturnValue + ", Status: " + NUMBERS[j]->ErrorMessageText;
-                    LogFile.WriteToFile(ESP_LOG_ERROR, TAG, _zw);
-                    WriteDataLog(j);
-                    continue;
+                    if (isDigitRollover && analogConfirmsRollover) {
+                        // Analog pointer confirms digit rollover - accept the value (fix for issue #712)
+                        LogFile.WriteToFile(ESP_LOG_INFO, TAG, NUMBERS[j]->name +
+                            ": Digit rollover accepted (diff=" + to_string(_valueDiff) +
+                            ", analog=" + to_string(NUMBERS[j]->analog_roi->ROI[0]->result_float) +
+                            " >= threshold=" + to_string(NUMBERS[j]->AnalogToDigitTransitionStart) + ")");
+                    }
+                    else {
+                        NUMBERS[j]->ErrorMessageText = NUMBERS[j]->ErrorMessageText + "Rate too high - Read: " + RundeOutput(NUMBERS[j]->Value, NUMBERS[j]->Nachkomma) + " - Pre: " + RundeOutput(NUMBERS[j]->PreValue, NUMBERS[j]->Nachkomma) + " - Rate: " + RundeOutput(_ratedifference, NUMBERS[j]->Nachkomma);
+                        NUMBERS[j]->Value = NUMBERS[j]->PreValue;
+                        NUMBERS[j]->ReturnValue = "";
+                        NUMBERS[j]->ReturnRateValue = "";
+                        NUMBERS[j]->timeStampLastValue = imagetime;
+
+                        string _zw = NUMBERS[j]->name + ": Raw: " + NUMBERS[j]->ReturnRawValue + ", Value: " + NUMBERS[j]->ReturnValue + ", Status: " + NUMBERS[j]->ErrorMessageText;
+                        LogFile.WriteToFile(ESP_LOG_ERROR, TAG, _zw);
+                        WriteDataLog(j);
+                        continue;
+                    }
                 }
             }
 
@@ -1125,6 +1169,11 @@ float ClassFlowPostProcessing::checkDigitConsistency(double input, int _decilams
     #endif
     LogFile.WriteToFile(ESP_LOG_DEBUG, TAG, "checkDigitConsistency: pot=" + std::to_string(pot) + ", decimalshift=" + std::to_string(_decilamshift));
 	
+    if (input <= 0) {
+        LogFile.WriteToFile(ESP_LOG_WARN, TAG, "checkDigitConsistency: input <= 0 (" + std::to_string(input) + "), skipping check");
+        return input;
+    }
+
     pot_max = ((int) log10(input)) + 1;
 	
     while (pot <= pot_max) {
