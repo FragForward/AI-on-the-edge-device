@@ -24,6 +24,7 @@ bool publishSystemData(int qos);
 std::string getTimeUnit(void);
 void GotConnected(std::string maintopic, bool SetRetainFlag);
 esp_err_t sendDiscovery_and_static_Topics(void);
+bool sendROIDiscoveryTopics(std::string group, NumberPost* number, int qos);
 
 std::string createNodeId(std::string &topic);
 

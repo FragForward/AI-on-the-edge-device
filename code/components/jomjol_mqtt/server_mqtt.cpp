@@ -190,28 +190,7 @@ bool MQTThomeassistantDiscovery(int qos) {
     allSendsSuccessed |= sendHomeAssistantDiscoveryTopic("",     "status",          "Status",            "list-status",               "",    "",               "",            "diagnostic", qos);
     allSendsSuccessed |= sendHomeAssistantDiscoveryTopic("",     "flowstart",       "Manual Flow Start", "timer-play-outline",        "",    "",               "",            "",           qos);
 
-    /* Meter image entity (HA MQTT image component using url_topic) */
-    {
-        std::string node_id = createNodeId(maintopic);
-        std::string imgTopicFull = "homeassistant/image/" + node_id + "/meter_image/config";
-        std::string imgPayload = string("{") +
-            "\"~\": \"" + maintopic + "\"," +
-            "\"unique_id\": \"" + maintopic + "-meter_image\"," +
-            "\"object_id\": \"" + maintopic + "_meter_image\"," +
-            "\"default_entity_id\": \"image." + maintopic + "_meter_image\"," +
-            "\"name\": \"Meter Image\"," +
-            "\"icon\": \"mdi:camera\"," +
-            "\"url_topic\": \"~/image_url\"," +
-            "\"availability_topic\": \"~/" + std::string(LWT_TOPIC) + "\"," +
-            "\"payload_available\": \"" + LWT_CONNECTED + "\"," +
-            "\"payload_not_available\": \"" + LWT_DISCONNECTED + "\"," +
-            "\"device\": {" +
-                "\"identifiers\": [\"" + maintopic + "\"]," +
-                "\"name\": \"" + maintopic + "\"" +
-            "}" +
-        "}";
-        allSendsSuccessed |= MQTTPublish(imgTopicFull, imgPayload, qos, true);
-    }
+    // Note: Image, PreValue, and ROI discovery are sent separately via sendROIDiscoveryTopics()
 
     for (int i = 0; i < (*NUMBERS).size(); ++i) {
         std::string group = (*NUMBERS)[i]->name;
@@ -243,90 +222,10 @@ bool MQTThomeassistantDiscovery(int qos) {
         allSendsSuccessed |= sendHomeAssistantDiscoveryTopic(group,   "rate_per_time_unit",         "Rate (" + rateUnit + ")",              "swap-vertical",             rateUnit,              rate_device_class, "measurement",      "",               qos);
         allSendsSuccessed |= sendHomeAssistantDiscoveryTopic(group,   "rate_per_digitization_round","Change since last Digitization round", "arrow-expand-vertical",     valueUnit,             "",                "measurement",      "",               qos); // correctly the Unit is Unit/Interval!
         allSendsSuccessed |= sendHomeAssistantDiscoveryTopic(group,   "timestamp",                  "Timestamp",                            "clock-time-eight-outline",  "",                    "timestamp",       "",                 "diagnostic",     qos);
-        // JSON sensor: Use custom discovery to handle >255 char state limit.
-        // State shows just the value, full JSON is available as attributes.
-        {
-            std::string jGroup = group;
-            std::string jConfigTopic = "json";
-            std::string jName = "JSON";
-            if (jGroup != "" && (*NUMBERS).size() > 1) {
-                jConfigTopic = jGroup + "_json";
-                jName = jGroup + " JSON";
-            }
-            std::string jNodeId = createNodeId(maintopic);
-            std::string jTopicFull = "homeassistant/sensor/" + jNodeId + "/" + jConfigTopic + "/config";
-            std::string jStateTopic = (jGroup != "") ? "~/" + jGroup + "/json" : "~/main/json";
-            std::string jPayload = string("{") +
-                "\"~\": \"" + maintopic + "\"," +
-                "\"unique_id\": \"" + maintopic + "-" + jConfigTopic + "\"," +
-                "\"object_id\": \"" + maintopic + "_" + jConfigTopic + "\"," +
-                "\"default_entity_id\": \"sensor." + maintopic + "_" + jConfigTopic + "\"," +
-                "\"name\": \"" + jName + "\"," +
-                "\"icon\": \"mdi:code-json\"," +
-                "\"state_topic\": \"" + jStateTopic + "\"," +
-                "\"value_template\": \"{{ value_json.value }}\"," +
-                "\"json_attributes_topic\": \"" + jStateTopic + "\"," +
-                "\"entity_category\": \"diagnostic\"," +
-                "\"availability_topic\": \"~/" + std::string(LWT_TOPIC) + "\"," +
-                "\"payload_available\": \"" + LWT_CONNECTED + "\"," +
-                "\"payload_not_available\": \"" + LWT_DISCONNECTED + "\"," +
-                "\"device\": {" +
-                    "\"identifiers\": [\"" + maintopic + "\"]," +
-                    "\"name\": \"" + maintopic + "\"" +
-                "}" +
-            "}";
-            allSendsSuccessed |= MQTTPublish(jTopicFull, jPayload, qos, true);
-        }
+        allSendsSuccessed |= sendHomeAssistantDiscoveryTopic(group,   "json",                       "JSON",                                 "code-json",                 "",                    "",                "",                 "diagnostic",     qos);
         allSendsSuccessed |= sendHomeAssistantDiscoveryTopic(group,   "problem",                    "Problem",                              "alert-outline",             "",                    "problem",         "",                 "",               qos); // Special binary sensor which is based on error topic
-
-        // Individual digit ROI discovery topics
-        if ((*NUMBERS)[i]->digit_roi) {
-            for (int d = 0; d < (*NUMBERS)[i]->digit_roi->ROI.size(); ++d) {
-                std::string roiName = (*NUMBERS)[i]->digit_roi->ROI[d]->name;
-                allSendsSuccessed |= sendHomeAssistantDiscoveryTopic(group, roiName, "Digit " + roiName, "numeric", "", "", "measurement", "diagnostic", qos);
-            }
-        }
-
-        // Individual analog ROI discovery topics
-        if ((*NUMBERS)[i]->analog_roi) {
-            for (int a = 0; a < (*NUMBERS)[i]->analog_roi->ROI.size(); ++a) {
-                std::string roiName = (*NUMBERS)[i]->analog_roi->ROI[a]->name;
-                allSendsSuccessed |= sendHomeAssistantDiscoveryTopic(group, roiName, "Analog " + roiName, "gauge", "", "", "measurement", "diagnostic", qos);
-            }
-        }
-
-        /* Set PreValue number entity (HA MQTT number component) */
-        {
-            std::string node_id = createNodeId(maintopic);
-            std::string numbersName = (*NUMBERS)[i]->name;
-            std::string configId = (group != "") ? group + "_set_prevalue" : "set_prevalue";
-            std::string friendlyName = (group != "") ? group + " Set PreValue" : "Set PreValue";
-            std::string numTopicFull = "homeassistant/number/" + node_id + "/" + configId + "/config";
-
-            // command_template wraps the HA number value in the JSON format expected by mqtt_handler_set_prevalue
-            std::string numPayload = string("{") +
-                "\"~\": \"" + maintopic + "\"," +
-                "\"unique_id\": \"" + maintopic + "-" + configId + "\"," +
-                "\"object_id\": \"" + maintopic + "_" + configId + "\"," +
-                "\"default_entity_id\": \"number." + maintopic + "_" + configId + "\"," +
-                "\"name\": \"" + friendlyName + "\"," +
-                "\"icon\": \"mdi:counter\"," +
-                "\"command_topic\": \"~/ctrl/set_prevalue\"," +
-                "\"command_template\": \"{\\\"numbersname\\\": \\\"" + numbersName + "\\\", \\\"value\\\": {{ value }}}\"," +
-                "\"min\": 0," +
-                "\"max\": 99999999," +
-                "\"step\": 0.0001," +
-                "\"mode\": \"box\"," +
-                "\"availability_topic\": \"~/" + std::string(LWT_TOPIC) + "\"," +
-                "\"payload_available\": \"" + LWT_CONNECTED + "\"," +
-                "\"payload_not_available\": \"" + LWT_DISCONNECTED + "\"," +
-                "\"device\": {" +
-                    "\"identifiers\": [\"" + maintopic + "\"]," +
-                    "\"name\": \"" + maintopic + "\"" +
-                "}" +
-            "}";
-            allSendsSuccessed |= MQTTPublish(numTopicFull, numPayload, qos, true);
-        }
+        // Note: dig/ana ROI discovery and PreValue/Image discovery are sent separately
+        // from ClassFlowMQTT::doFlow() to avoid heap exhaustion during bulk discovery.
     }
 
     LogFile.WriteToFile(ESP_LOG_DEBUG, TAG, "Successfully published all Homeassistant Discovery MQTT topics");
@@ -340,6 +239,98 @@ bool MQTThomeassistantDiscovery(int qos) {
 
     return allSendsSuccessed;
 }
+
+/**
+ * Send HA Discovery topics for individual ROI sensors (dig/ana) and PreValue number entity.
+ * Called from ClassFlowMQTT::doFlow() AFTER values have been published,
+ * to ensure ROI data is available and to spread memory usage over time.
+ */
+bool sendROIDiscoveryTopics(std::string group, NumberPost* number, int qos) {
+    if (!HomeassistantDiscovery || !getMQTTisConnected()) {
+        return false;
+    }
+
+    bool success = false;
+
+    // Individual digit ROI discovery
+    if (number->digit_roi) {
+        for (int d = 0; d < number->digit_roi->ROI.size(); ++d) {
+            std::string roiName = number->digit_roi->ROI[d]->name;
+            success |= sendHomeAssistantDiscoveryTopic(group, roiName, "Digit " + roiName,
+                "numeric", "", "", "measurement", "diagnostic", qos);
+        }
+    }
+
+    // Individual analog ROI discovery
+    if (number->analog_roi) {
+        for (int a = 0; a < number->analog_roi->ROI.size(); ++a) {
+            std::string roiName = number->analog_roi->ROI[a]->name;
+            success |= sendHomeAssistantDiscoveryTopic(group, roiName, "Analog " + roiName,
+                "gauge", "", "", "measurement", "diagnostic", qos);
+        }
+    }
+
+    // PreValue number entity
+    {
+        std::string node_id = createNodeId(maintopic);
+        std::string numbersName = number->name;
+        std::string configId = (group != "") ? group + "_set_prevalue" : "set_prevalue";
+        std::string friendlyName = (group != "") ? group + " Set PreValue" : "Set PreValue";
+        std::string numTopicFull = "homeassistant/number/" + node_id + "/" + configId + "/config";
+        std::string numPayload = string("{") +
+            "\"~\": \"" + maintopic + "\"," +
+            "\"unique_id\": \"" + maintopic + "-" + configId + "\"," +
+            "\"object_id\": \"" + maintopic + "_" + configId + "\"," +
+            "\"default_entity_id\": \"number." + maintopic + "_" + configId + "\"," +
+            "\"name\": \"" + friendlyName + "\"," +
+            "\"icon\": \"mdi:counter\"," +
+            "\"command_topic\": \"~/ctrl/set_prevalue\"," +
+            "\"command_template\": \"{\\\"numbersname\\\": \\\"" + numbersName + "\\\", \\\"value\\\": {{ value }}}\"," +
+            "\"min\": 0," +
+            "\"max\": 99999999," +
+            "\"step\": 0.0001," +
+            "\"mode\": \"box\"," +
+            "\"availability_topic\": \"~/" + std::string(LWT_TOPIC) + "\"," +
+            "\"payload_available\": \"" + LWT_CONNECTED + "\"," +
+            "\"payload_not_available\": \"" + LWT_DISCONNECTED + "\"," +
+            "\"device\": {" +
+                "\"identifiers\": [\"" + maintopic + "\"]," +
+                "\"name\": \"" + maintopic + "\"" +
+            "}" +
+        "}";
+        success |= MQTTPublish(numTopicFull, numPayload, qos, true);
+    }
+
+    // Image entity
+    {
+        std::string node_id = createNodeId(maintopic);
+        std::string imgTopicFull = "homeassistant/image/" + node_id + "/meter_image/config";
+        std::string imgPayload = string("{") +
+            "\"~\": \"" + maintopic + "\"," +
+            "\"unique_id\": \"" + maintopic + "-meter_image\"," +
+            "\"object_id\": \"" + maintopic + "_meter_image\"," +
+            "\"default_entity_id\": \"image." + maintopic + "_meter_image\"," +
+            "\"name\": \"Meter Image\"," +
+            "\"icon\": \"mdi:camera\"," +
+            "\"url_topic\": \"~/image_url\"," +
+            "\"availability_topic\": \"~/" + std::string(LWT_TOPIC) + "\"," +
+            "\"payload_available\": \"" + LWT_CONNECTED + "\"," +
+            "\"payload_not_available\": \"" + LWT_DISCONNECTED + "\"," +
+            "\"device\": {" +
+                "\"identifiers\": [\"" + maintopic + "\"]," +
+                "\"name\": \"" + maintopic + "\"" +
+            "}" +
+        "}";
+        success |= MQTTPublish(imgTopicFull, imgPayload, qos, true);
+    }
+
+    if (success) {
+        LogFile.WriteToFile(ESP_LOG_INFO, TAG, "ROI/PreValue/Image discovery topics published successfully");
+    }
+
+    return success;
+}
+
 
 bool publishSystemData(int qos) {
     bool allSendsSuccessed = false;
@@ -439,23 +430,7 @@ esp_err_t sendDiscovery_and_static_Topics(void) {
     success |= publishStaticData(1);
 
     if (success) { // Success, clear the flag
-        // Check if ROI data was available during discovery.
-        // If digit_roi/analog_roi were still NULL (first boot, before first classification),
-        // keep the flag set so discovery re-runs after ROI data becomes available.
-        bool roiDataAvailable = true;
-        if (NUMBERS != NULL) {
-            for (int i = 0; i < (*NUMBERS).size(); ++i) {
-                if ((*NUMBERS)[i]->digit_roi == NULL && (*NUMBERS)[i]->analog_roi == NULL) {
-                    roiDataAvailable = false;
-                    break;
-                }
-            }
-        }
-        if (roiDataAvailable) {
-            sendingOf_DiscoveryAndStaticTopics_scheduled = false;
-        } else {
-            LogFile.WriteToFile(ESP_LOG_INFO, TAG, "ROI data not yet available, will re-send discovery after next round");
-        }
+        sendingOf_DiscoveryAndStaticTopics_scheduled = false;
         return ESP_OK;
     }
     else {

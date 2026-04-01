@@ -253,6 +253,7 @@ bool ClassFlowMQTT::Start(float AutoInterval)
 
 bool ClassFlowMQTT::doFlow(string zwtime)
 {
+    static bool roiDiscoverySent = false;
     bool success;
     std::string result;
     std::string resulterror = "";
@@ -354,6 +355,15 @@ bool ClassFlowMQTT::doFlow(string zwtime)
                     std::string roiName = (*NUMBERS)[i]->analog_roi->ROI[a]->name;
                     std::string roiValue = to_string((*NUMBERS)[i]->analog_roi->ROI[a]->result_float);
                     success |= MQTTPublish(namenumber + roiName, roiValue, qos, SetRetainFlag);
+                }
+            }
+
+            // Send ROI/PreValue/Image HA Discovery topics (once after first successful publish)
+            if (!roiDiscoverySent) {
+                std::string discGroup = (*NUMBERS)[i]->name;
+                if (discGroup == "default") discGroup = "";
+                if (sendROIDiscoveryTopics(discGroup, (*NUMBERS)[i], qos)) {
+                    roiDiscoverySent = true;
                 }
             }
         }
