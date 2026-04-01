@@ -236,7 +236,7 @@ bool MQTThomeassistantDiscovery(int qos) {
 
     //                                                       Group   | Field                       | User Friendly Name                    | Icon                       | Unit                 | Device Class     | State Class       | Entity Category | QoS
         allSendsSuccessed |= sendHomeAssistantDiscoveryTopic(group,   "value",                      "Value",                                "gauge",                     valueUnit,             meterType,         value_state_class,  "",               qos); // State Class = "total_increasing" if <NUMBERS>.AllowNegativeRates = false, "measurement" in case of a thermometer, else use "total".
-        allSendsSuccessed |= sendHomeAssistantDiscoveryTopic(group,   "raw",                        "Raw Value",                            "raw",                       valueUnit,             meterType,         value_state_class,  "diagnostic",     qos);
+        allSendsSuccessed |= sendHomeAssistantDiscoveryTopic(group,   "raw",                        "Raw Value",                            "numeric",                   valueUnit,             meterType,         value_state_class,  "diagnostic",     qos);
         allSendsSuccessed |= sendHomeAssistantDiscoveryTopic(group,   "error",                      "Error",                                "alert-circle-outline",      "",                    "",                "",                 "diagnostic",     qos);
         /* Not announcing "rate" as it is better to use rate_per_time_unit resp. rate_per_digitization_round */
      // allSendsSuccessed |= sendHomeAssistantDiscoveryTopic(group,   "rate",                       "Rate (Unit/Minute)",                   "swap-vertical",             "",                    "",                "",                 "",               qos); // Legacy, always Unit per Minute
@@ -406,7 +406,23 @@ esp_err_t sendDiscovery_and_static_Topics(void) {
     success |= publishStaticData(1);
 
     if (success) { // Success, clear the flag
-        sendingOf_DiscoveryAndStaticTopics_scheduled = false;
+        // Check if ROI data was available during discovery.
+        // If digit_roi/analog_roi were still NULL (first boot, before first classification),
+        // keep the flag set so discovery re-runs after ROI data becomes available.
+        bool roiDataAvailable = true;
+        if (NUMBERS != NULL) {
+            for (int i = 0; i < (*NUMBERS).size(); ++i) {
+                if ((*NUMBERS)[i]->digit_roi == NULL && (*NUMBERS)[i]->analog_roi == NULL) {
+                    roiDataAvailable = false;
+                    break;
+                }
+            }
+        }
+        if (roiDataAvailable) {
+            sendingOf_DiscoveryAndStaticTopics_scheduled = false;
+        } else {
+            LogFile.WriteToFile(ESP_LOG_INFO, TAG, "ROI data not yet available, will re-send discovery after next round");
+        }
         return ESP_OK;
     }
     else {
