@@ -243,7 +243,40 @@ bool MQTThomeassistantDiscovery(int qos) {
         allSendsSuccessed |= sendHomeAssistantDiscoveryTopic(group,   "rate_per_time_unit",         "Rate (" + rateUnit + ")",              "swap-vertical",             rateUnit,              rate_device_class, "measurement",      "",               qos);
         allSendsSuccessed |= sendHomeAssistantDiscoveryTopic(group,   "rate_per_digitization_round","Change since last Digitization round", "arrow-expand-vertical",     valueUnit,             "",                "measurement",      "",               qos); // correctly the Unit is Unit/Interval!
         allSendsSuccessed |= sendHomeAssistantDiscoveryTopic(group,   "timestamp",                  "Timestamp",                            "clock-time-eight-outline",  "",                    "timestamp",       "",                 "diagnostic",     qos);
-        allSendsSuccessed |= sendHomeAssistantDiscoveryTopic(group,   "json",                       "JSON",                                 "code-json",                 "",                    "",                "",                 "diagnostic",     qos);
+        // JSON sensor: Use custom discovery to handle >255 char state limit.
+        // State shows just the value, full JSON is available as attributes.
+        {
+            std::string jGroup = group;
+            std::string jConfigTopic = "json";
+            std::string jName = "JSON";
+            if (jGroup != "" && (*NUMBERS).size() > 1) {
+                jConfigTopic = jGroup + "_json";
+                jName = jGroup + " JSON";
+            }
+            std::string jNodeId = createNodeId(maintopic);
+            std::string jTopicFull = "homeassistant/sensor/" + jNodeId + "/" + jConfigTopic + "/config";
+            std::string jStateTopic = (jGroup != "") ? "~/" + jGroup + "/json" : "~/main/json";
+            std::string jPayload = string("{") +
+                "\"~\": \"" + maintopic + "\"," +
+                "\"unique_id\": \"" + maintopic + "-" + jConfigTopic + "\"," +
+                "\"object_id\": \"" + maintopic + "_" + jConfigTopic + "\"," +
+                "\"default_entity_id\": \"sensor." + maintopic + "_" + jConfigTopic + "\"," +
+                "\"name\": \"" + jName + "\"," +
+                "\"icon\": \"mdi:code-json\"," +
+                "\"state_topic\": \"" + jStateTopic + "\"," +
+                "\"value_template\": \"{{ value_json.value }}\"," +
+                "\"json_attributes_topic\": \"" + jStateTopic + "\"," +
+                "\"entity_category\": \"diagnostic\"," +
+                "\"availability_topic\": \"~/" + std::string(LWT_TOPIC) + "\"," +
+                "\"payload_available\": \"" + LWT_CONNECTED + "\"," +
+                "\"payload_not_available\": \"" + LWT_DISCONNECTED + "\"," +
+                "\"device\": {" +
+                    "\"identifiers\": [\"" + maintopic + "\"]," +
+                    "\"name\": \"" + maintopic + "\"" +
+                "}" +
+            "}";
+            allSendsSuccessed |= MQTTPublish(jTopicFull, jPayload, qos, true);
+        }
         allSendsSuccessed |= sendHomeAssistantDiscoveryTopic(group,   "problem",                    "Problem",                              "alert-outline",             "",                    "problem",         "",                 "",               qos); // Special binary sensor which is based on error topic
 
         // Individual digit ROI discovery topics
