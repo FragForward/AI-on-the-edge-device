@@ -965,12 +965,53 @@ bool ClassFlowPostProcessing::doFlow(string zwtime) {
 
             // LastValueTimeDifference = LastValueTimeDifference / 60;       // in minutes
             LastPreValueTimeDifference = LastPreValueTimeDifference / 60; // in minutes
+
+            // Digit stabilization using analog pointer position:
+            // The ones digit (last integer digit) is locked to PreValue's ones digit.
+            // A digit change (e.g. 2->3) is only accepted when analog ROI[0] < 2.0,
+            // meaning the analog pointer has completed the rollover past 0.
+            // When analog >= 2.0, the digit is in the stable zone and any digit change
+            // is a CNN misread - we correct by keeping PreValue's integer part
+            // while preserving the new decimal reading (real sub-digit changes).
+            if (NUMBERS[j]->analog_roi != NULL && NUMBERS[j]->analog_roi->ROI.size() > 0 &&
+                NUMBERS[j]->AnalogToDigitTransitionStart > 0) {
+                double intPartValue = floor(NUMBERS[j]->Value);
+                double intPartPre = floor(NUMBERS[j]->PreValue);
+
+                if (intPartValue != intPartPre) {
+                    double intDiff = intPartValue - intPartPre;
+                    float analogValue = NUMBERS[j]->analog_roi->ROI[0]->result_float;
+
+                    // Only handle single-digit forward jumps (+1 unit, e.g. 1392->1393)
+                    if (intDiff >= 0.5 && intDiff <= 1.5) {
+                        if (analogValue >= 2.0) {
+                            // Analog is NOT in post-rollover zone -> digit misread
+                            // Keep PreValue's integer part, use new reading's decimal part
+                            double decPartValue = NUMBERS[j]->Value - intPartValue;
+                            NUMBERS[j]->Value = intPartPre + decPartValue;
+                            NUMBERS[j]->ReturnValue = RundeOutput(NUMBERS[j]->Value, NUMBERS[j]->Nachkomma);
+                            LogFile.WriteToFile(ESP_LOG_INFO, TAG, NUMBERS[j]->name +
+                                ": Digit stabilized - kept digit " + to_string((int)intPartPre % 10) +
+                                " (analog=" + to_string(analogValue) + " >= 2.0, no rollover)");
+                        }
+                        else {
+                            // Analog < 2.0 -> rollover past 0 confirmed, accept new digit
+                            LogFile.WriteToFile(ESP_LOG_INFO, TAG, NUMBERS[j]->name +
+                                ": Digit rollover accepted " + to_string((int)intPartPre % 10) +
+                                " -> " + to_string((int)intPartValue % 10) +
+                                " (analog=" + to_string(analogValue) + " < 2.0)");
+                        }
+                    }
+                    // Larger jumps (>1 unit) fall through to MaxRateValue check
+                }
+            }
+
             NUMBERS[j]->FlowRateAct = (NUMBERS[j]->Value - NUMBERS[j]->PreValue) / LastPreValueTimeDifference;
             NUMBERS[j]->ReturnRateValue =  to_string(NUMBERS[j]->FlowRateAct);
 
             if ((NUMBERS[j]->useMaxRateValue) && (NUMBERS[j]->Value != NUMBERS[j]->PreValue)) {
                 double _ratedifference;
-					
+
                 if (NUMBERS[j]->MaxRateType == RateChange) {
                     _ratedifference = NUMBERS[j]->FlowRateAct;
                 }
@@ -983,33 +1024,16 @@ bool ClassFlowPostProcessing::doFlow(string zwtime) {
                 }
 
                 if (abs(_ratedifference) > abs(NUMBERS[j]->MaxRateValue)) {
-                    // Check if this is a legitimate single-digit rollover confirmed by the analog pointer
-                    double _valueDiff = NUMBERS[j]->Value - NUMBERS[j]->PreValue;
-                    bool isDigitRollover = (_valueDiff >= 0.8 && _valueDiff <= 1.2);
-                    bool analogConfirmsRollover = (NUMBERS[j]->analog_roi != NULL &&
-                                                   NUMBERS[j]->analog_roi->ROI.size() > 0 &&
-                                                   NUMBERS[j]->AnalogToDigitTransitionStart > 0 &&
-                                                   NUMBERS[j]->analog_roi->ROI[0]->result_float >= NUMBERS[j]->AnalogToDigitTransitionStart);
+                    NUMBERS[j]->ErrorMessageText = NUMBERS[j]->ErrorMessageText + "Rate too high - Read: " + RundeOutput(NUMBERS[j]->Value, NUMBERS[j]->Nachkomma) + " - Pre: " + RundeOutput(NUMBERS[j]->PreValue, NUMBERS[j]->Nachkomma) + " - Rate: " + RundeOutput(_ratedifference, NUMBERS[j]->Nachkomma);
+                    NUMBERS[j]->Value = NUMBERS[j]->PreValue;
+                    NUMBERS[j]->ReturnValue = "";
+                    NUMBERS[j]->ReturnRateValue = "";
+                    NUMBERS[j]->timeStampLastValue = imagetime;
 
-                    if (isDigitRollover && analogConfirmsRollover) {
-                        // Analog pointer confirms digit rollover - accept the value (fix for issue #712)
-                        LogFile.WriteToFile(ESP_LOG_INFO, TAG, NUMBERS[j]->name +
-                            ": Digit rollover accepted (diff=" + to_string(_valueDiff) +
-                            ", analog=" + to_string(NUMBERS[j]->analog_roi->ROI[0]->result_float) +
-                            " >= threshold=" + to_string(NUMBERS[j]->AnalogToDigitTransitionStart) + ")");
-                    }
-                    else {
-                        NUMBERS[j]->ErrorMessageText = NUMBERS[j]->ErrorMessageText + "Rate too high - Read: " + RundeOutput(NUMBERS[j]->Value, NUMBERS[j]->Nachkomma) + " - Pre: " + RundeOutput(NUMBERS[j]->PreValue, NUMBERS[j]->Nachkomma) + " - Rate: " + RundeOutput(_ratedifference, NUMBERS[j]->Nachkomma);
-                        NUMBERS[j]->Value = NUMBERS[j]->PreValue;
-                        NUMBERS[j]->ReturnValue = "";
-                        NUMBERS[j]->ReturnRateValue = "";
-                        NUMBERS[j]->timeStampLastValue = imagetime;
-
-                        string _zw = NUMBERS[j]->name + ": Raw: " + NUMBERS[j]->ReturnRawValue + ", Value: " + NUMBERS[j]->ReturnValue + ", Status: " + NUMBERS[j]->ErrorMessageText;
-                        LogFile.WriteToFile(ESP_LOG_ERROR, TAG, _zw);
-                        WriteDataLog(j);
-                        continue;
-                    }
+                    string _zw = NUMBERS[j]->name + ": Raw: " + NUMBERS[j]->ReturnRawValue + ", Value: " + NUMBERS[j]->ReturnValue + ", Status: " + NUMBERS[j]->ErrorMessageText;
+                    LogFile.WriteToFile(ESP_LOG_ERROR, TAG, _zw);
+                    WriteDataLog(j);
+                    continue;
                 }
             }
 
