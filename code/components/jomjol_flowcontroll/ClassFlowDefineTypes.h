@@ -76,10 +76,13 @@ struct NumberPost {
 
     bool isExtendedResolution;  // extendResolution; Adds the decimal place of the least significant analog ROI to the value
 
+    bool digitRolloverPending;  // Digit rollover was accepted, but not yet confirmed by analog reaching stable zone (>= 5.0).
+                                // While true, further rollovers are blocked to prevent consecutive misread acceptance.
+
     general *digit_roi;         // digitRoi; set of digit ROIs for the sequence
     general *analog_roi;        // analogRoi; set of analog ROIs for the sequence
 
-    string name;                // name; Designation for the sequence 
+    string name;                // name; Designation for the sequence
 };
 
 #endif

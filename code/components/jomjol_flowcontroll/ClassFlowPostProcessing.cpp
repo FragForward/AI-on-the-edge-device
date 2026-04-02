@@ -726,6 +726,7 @@ void ClassFlowPostProcessing::InitNUMBERS() {
         _number->DecimalShift = 0;
         _number->DecimalShiftInitial = 0;
         _number->isExtendedResolution = false;
+        _number->digitRolloverPending = false;
         _number->AnalogToDigitTransitionStart=9.2;
         _number->ChangeRateThreshold = 2;
 
@@ -966,43 +967,112 @@ bool ClassFlowPostProcessing::doFlow(string zwtime) {
             // LastValueTimeDifference = LastValueTimeDifference / 60;       // in minutes
             LastPreValueTimeDifference = LastPreValueTimeDifference / 60; // in minutes
 
-            // Digit stabilization using analog pointer position:
-            // The ones digit (last integer digit) is locked to PreValue's ones digit.
-            // A digit change (e.g. 2->3) is only accepted when analog ROI[0] < 2.0,
-            // meaning the analog pointer has completed the rollover past 0.
-            // When analog >= 2.0, the digit is in the stable zone and any digit change
-            // is a CNN misread - we correct by keeping PreValue's integer part
-            // while preserving the new decimal reading (real sub-digit changes).
-            if (NUMBERS[j]->analog_roi != NULL && NUMBERS[j]->analog_roi->ROI.size() > 0 &&
-                NUMBERS[j]->AnalogToDigitTransitionStart > 0) {
-                double intPartValue = floor(NUMBERS[j]->Value);
-                double intPartPre = floor(NUMBERS[j]->PreValue);
+            // Digit stabilization using predecessor rollover confirmation with state tracking:
+            //
+            // State machine per number sequence (digitRolloverPending flag):
+            //   STABLE (false):  Digit locked. Rollover allowed when predecessor < 2.0
+            //   PENDING (true):  Rollover was accepted. Further rollovers BLOCKED
+            //                    until analog ROI[0] >= 5.0 (confirms digit is stable)
+            //
+            // Each digital digit is locked to PreValue's digit at that position.
+            // A digit change is only accepted when its predecessor has result_float < 2.0,
+            // confirming it just rolled past 0 (9->0 transition completed).
+            // Predecessor chain: ones <- analog ROI[0], tens <- ones_ROI, hundreds <- tens_ROI, etc.
+            // If any digit changed without predecessor confirmation, the entire integer part
+            // is reverted to PreValue (decimal part is kept for real sub-digit changes).
+            if (NUMBERS[j]->digit_roi != NULL && NUMBERS[j]->analog_roi != NULL &&
+                NUMBERS[j]->analog_roi->ROI.size() > 0 && NUMBERS[j]->AnalogToDigitTransitionStart > 0) {
+
+                float analogValue = NUMBERS[j]->analog_roi->ROI[0]->result_float;
+
+                // State transition: if a rollover was previously accepted, wait for analog to reach
+                // stable zone (>= 5.0) before allowing the next rollover
+                if (NUMBERS[j]->digitRolloverPending && analogValue >= 5.0) {
+                    NUMBERS[j]->digitRolloverPending = false;
+                    LogFile.WriteToFile(ESP_LOG_INFO, TAG, NUMBERS[j]->name +
+                        ": Digit confirmed stable (analog=" + to_string(analogValue) + " >= 5.0)");
+                }
+
+                long long intPartValue = (long long)floor(NUMBERS[j]->Value);
+                long long intPartPre = (long long)floor(NUMBERS[j]->PreValue);
 
                 if (intPartValue != intPartPre) {
-                    double intDiff = intPartValue - intPartPre;
-                    float analogValue = NUMBERS[j]->analog_roi->ROI[0]->result_float;
+                    int numDigitROIs = NUMBERS[j]->digit_roi->ROI.size();
+                    bool digitMisread = false;
 
-                    // Only handle single-digit forward jumps (+1 unit, e.g. 1392->1393)
-                    if (intDiff >= 0.5 && intDiff <= 1.5) {
-                        if (analogValue >= 2.0) {
-                            // Analog is NOT in post-rollover zone -> digit misread
-                            // Keep PreValue's integer part, use new reading's decimal part
-                            double decPartValue = NUMBERS[j]->Value - intPartValue;
-                            NUMBERS[j]->Value = intPartPre + decPartValue;
-                            NUMBERS[j]->ReturnValue = RundeOutput(NUMBERS[j]->Value, NUMBERS[j]->Nachkomma);
-                            LogFile.WriteToFile(ESP_LOG_INFO, TAG, NUMBERS[j]->name +
-                                ": Digit stabilized - kept digit " + to_string((int)intPartPre % 10) +
-                                " (analog=" + to_string(analogValue) + " >= 2.0, no rollover)");
-                        }
-                        else {
-                            // Analog < 2.0 -> rollover past 0 confirmed, accept new digit
-                            LogFile.WriteToFile(ESP_LOG_INFO, TAG, NUMBERS[j]->name +
-                                ": Digit rollover accepted " + to_string((int)intPartPre % 10) +
-                                " -> " + to_string((int)intPartValue % 10) +
-                                " (analog=" + to_string(analogValue) + " < 2.0)");
+                    for (int d = 0; d < numDigitROIs; d++) {
+                        long long divisor = 1;
+                        for (int p = 0; p < d; p++) divisor *= 10;
+
+                        int digitValue = (int)((intPartValue / divisor) % 10);
+                        int digitPre = (int)((intPartPre / divisor) % 10);
+
+                        if (digitValue != digitPre) {
+                            // Digit changed - check if predecessor confirms rollover (9->0 completed)
+                            float predecessorFloat;
+                            string predecessorName;
+
+                            if (d == 0) {
+                                // Ones digit: predecessor is first analog ROI
+                                predecessorFloat = analogValue;
+                                predecessorName = "analog[0]";
+                            }
+                            else {
+                                // Higher digits: predecessor is the next lower digit ROI
+                                // ROI[numDigitROIs-1]=ones, ROI[numDigitROIs-2]=tens, etc.
+                                int predROIIdx = numDigitROIs - d;
+                                if (predROIIdx >= 0 && predROIIdx < numDigitROIs) {
+                                    predecessorFloat = NUMBERS[j]->digit_roi->ROI[predROIIdx]->result_float;
+                                    predecessorName = NUMBERS[j]->digit_roi->ROI[predROIIdx]->name;
+                                }
+                                else {
+                                    continue;
+                                }
+                            }
+
+                            int digitDiff = (digitValue - digitPre + 10) % 10;
+                            if (digitDiff == 1) {
+                                // Forward +1 change (rollover candidate)
+                                if (NUMBERS[j]->digitRolloverPending) {
+                                    // Previous rollover not yet confirmed - block this one
+                                    digitMisread = true;
+                                    LogFile.WriteToFile(ESP_LOG_INFO, TAG, NUMBERS[j]->name +
+                                        ": Digit rollover blocked at pos " + to_string(d) + " (" +
+                                        to_string(digitPre) + " -> " + to_string(digitValue) +
+                                        ") - previous rollover not yet confirmed (analog=" +
+                                        to_string(analogValue) + " < 5.0)");
+                                    break;
+                                }
+                                else if (predecessorFloat >= 2.0) {
+                                    // Predecessor NOT in post-rollover zone -> digit misread
+                                    digitMisread = true;
+                                    LogFile.WriteToFile(ESP_LOG_INFO, TAG, NUMBERS[j]->name +
+                                        ": Digit misread at pos " + to_string(d) + " (" +
+                                        to_string(digitPre) + " -> " + to_string(digitValue) +
+                                        ") - " + predecessorName + "=" + to_string(predecessorFloat) +
+                                        " >= 2.0, rollover not confirmed");
+                                    break; // No need to check higher digits
+                                }
+                                else {
+                                    // Predecessor < 2.0 -> rollover confirmed, set pending state
+                                    NUMBERS[j]->digitRolloverPending = true;
+                                    LogFile.WriteToFile(ESP_LOG_INFO, TAG, NUMBERS[j]->name +
+                                        ": Digit rollover at pos " + to_string(d) + " (" +
+                                        to_string(digitPre) + " -> " + to_string(digitValue) +
+                                        ") confirmed by " + predecessorName + "=" + to_string(predecessorFloat) +
+                                        " - pending confirmation (analog >= 5.0)");
+                                }
+                            }
+                            // Non-+1 changes fall through to MaxRateValue check
                         }
                     }
-                    // Larger jumps (>1 unit) fall through to MaxRateValue check
+
+                    if (digitMisread) {
+                        // Revert integer part to PreValue, keep new decimal reading
+                        double decPartValue = NUMBERS[j]->Value - (double)intPartValue;
+                        NUMBERS[j]->Value = (double)intPartPre + decPartValue;
+                        NUMBERS[j]->ReturnValue = RundeOutput(NUMBERS[j]->Value, NUMBERS[j]->Nachkomma);
+                    }
                 }
             }
 
