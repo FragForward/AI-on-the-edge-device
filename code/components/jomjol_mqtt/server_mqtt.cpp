@@ -253,20 +253,23 @@ bool sendROIDiscoveryTopics(std::string group, NumberPost* number, int qos) {
     bool success = false;
 
     // Individual digit ROI discovery
+    // Note: No state_class and no unit_of_measurement, because ROI values (0-9) have no physical unit.
+    // HA (2024.2+) rejects sensors with state_class but without unit_of_measurement.
     if (number->digit_roi) {
         for (int d = 0; d < number->digit_roi->ROI.size(); ++d) {
             std::string roiName = number->digit_roi->ROI[d]->name;
             success |= sendHomeAssistantDiscoveryTopic(group, roiName, "Digit " + roiName,
-                "numeric", "", "", "measurement", "diagnostic", qos);
+                "numeric", "", "", "", "diagnostic", qos);
         }
     }
 
     // Individual analog ROI discovery
+    // Note: No state_class and no unit_of_measurement, because ROI values (0.0-1.0) have no physical unit.
     if (number->analog_roi) {
         for (int a = 0; a < number->analog_roi->ROI.size(); ++a) {
             std::string roiName = number->analog_roi->ROI[a]->name;
             success |= sendHomeAssistantDiscoveryTopic(group, roiName, "Analog " + roiName,
-                "gauge", "", "", "measurement", "diagnostic", qos);
+                "gauge", "", "", "", "diagnostic", qos);
         }
     }
 

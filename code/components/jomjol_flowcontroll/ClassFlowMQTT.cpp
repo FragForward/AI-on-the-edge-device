@@ -337,7 +337,7 @@ bool ClassFlowMQTT::doFlow(string zwtime)
             if (resulttimestamp.length() > 0)
                 success |= MQTTPublish(namenumber + "timestamp", resulttimestamp, qos, SetRetainFlag);
 
-            std::string json = flowpostprocessing->getJsonFromNumber(i, "\n");
+            std::string json = flowpostprocessing->getJsonFromNumber(i, "\n", false); // Compact JSON without dig/ana (HA 255-char state limit)
             success |= MQTTPublish(namenumber + "json", json, qos, SetRetainFlag);
 
             // Publish individual digit ROI values
@@ -358,14 +358,17 @@ bool ClassFlowMQTT::doFlow(string zwtime)
                 }
             }
 
-            // Send ROI/PreValue/Image HA Discovery topics (once after first successful publish)
+            // Send ROI/PreValue/Image HA Discovery topics (once per meter after first successful publish)
             if (!roiDiscoverySent) {
                 std::string discGroup = (*NUMBERS)[i]->name;
                 if (discGroup == "default") discGroup = "";
-                if (sendROIDiscoveryTopics(discGroup, (*NUMBERS)[i], qos)) {
-                    roiDiscoverySent = true;
-                }
+                sendROIDiscoveryTopics(discGroup, (*NUMBERS)[i], qos);
             }
+        }
+
+        // Mark ROI discovery as sent after ALL meters have been processed
+        if (!roiDiscoverySent) {
+            roiDiscoverySent = true;
         }
     }
     

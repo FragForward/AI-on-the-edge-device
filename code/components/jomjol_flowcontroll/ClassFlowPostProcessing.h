@@ -60,7 +60,7 @@ public:
     string getReadoutRate(int _number = 0);
     string getReadoutTimeStamp(int _number = 0);
     void SavePreValue();
-    string getJsonFromNumber(int i, std::string _lineend);
+    string getJsonFromNumber(int i, std::string _lineend, bool includeROIDetails = true);
     string GetPreValue(std::string _number = "");
     bool SetPreValue(double zw, string _numbers, bool _extern = false);
 

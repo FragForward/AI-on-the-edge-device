@@ -48,7 +48,7 @@ std::string ClassFlowPostProcessing::GetJSON(std::string _lineend) {
     return json;
 }
 
-string ClassFlowPostProcessing::getJsonFromNumber(int i, std::string _lineend) {
+string ClassFlowPostProcessing::getJsonFromNumber(int i, std::string _lineend, bool includeROIDetails) {
     std::string json = "";
 
     json += "  {" + _lineend;
@@ -71,33 +71,39 @@ string ClassFlowPostProcessing::getJsonFromNumber(int i, std::string _lineend) {
         json += "    \"rate\": \"\"," + _lineend;
     }
 
-    json += "    \"timestamp\": \"" + NUMBERS[i]->timeStamp + "\"," + _lineend;
+    if (includeROIDetails) {
+        // Include individual dig/ana ROI values (used by REST API which has no size limit)
+        json += "    \"timestamp\": \"" + NUMBERS[i]->timeStamp + "\"," + _lineend;
 
-    // Individual digit ROI values
-    json += "    \"dig\": {" + _lineend;
-    if (NUMBERS[i]->digit_roi) {
-        for (int d = 0; d < NUMBERS[i]->digit_roi->ROI.size(); ++d) {
-            json += "      \"" + NUMBERS[i]->digit_roi->ROI[d]->name + "\": " + to_string(NUMBERS[i]->digit_roi->ROI[d]->result_float);
-            if (d < NUMBERS[i]->digit_roi->ROI.size() - 1) {
-                json += ",";
+        json += "    \"dig\": {" + _lineend;
+        if (NUMBERS[i]->digit_roi) {
+            for (int d = 0; d < NUMBERS[i]->digit_roi->ROI.size(); ++d) {
+                json += "      \"" + NUMBERS[i]->digit_roi->ROI[d]->name + "\": " + to_string(NUMBERS[i]->digit_roi->ROI[d]->result_float);
+                if (d < NUMBERS[i]->digit_roi->ROI.size() - 1) {
+                    json += ",";
+                }
+                json += _lineend;
             }
-            json += _lineend;
         }
-    }
-    json += "    }," + _lineend;
+        json += "    }," + _lineend;
 
-    // Individual analog ROI values
-    json += "    \"ana\": {" + _lineend;
-    if (NUMBERS[i]->analog_roi) {
-        for (int a = 0; a < NUMBERS[i]->analog_roi->ROI.size(); ++a) {
-            json += "      \"" + NUMBERS[i]->analog_roi->ROI[a]->name + "\": " + to_string(NUMBERS[i]->analog_roi->ROI[a]->result_float);
-            if (a < NUMBERS[i]->analog_roi->ROI.size() - 1) {
-                json += ",";
+        json += "    \"ana\": {" + _lineend;
+        if (NUMBERS[i]->analog_roi) {
+            for (int a = 0; a < NUMBERS[i]->analog_roi->ROI.size(); ++a) {
+                json += "      \"" + NUMBERS[i]->analog_roi->ROI[a]->name + "\": " + to_string(NUMBERS[i]->analog_roi->ROI[a]->result_float);
+                if (a < NUMBERS[i]->analog_roi->ROI.size() - 1) {
+                    json += ",";
+                }
+                json += _lineend;
             }
-            json += _lineend;
         }
+        json += "    }" + _lineend;
     }
-    json += "    }" + _lineend;
+    else {
+        // Compact JSON without dig/ana ROI details (used by MQTT to stay within HA's 255-char state limit).
+        // Individual ROI values are published as dedicated MQTT topics instead.
+        json += "    \"timestamp\": \"" + NUMBERS[i]->timeStamp + "\"" + _lineend;
+    }
 
     json += "  }" + _lineend;
 
