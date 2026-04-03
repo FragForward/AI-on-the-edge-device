@@ -1081,7 +1081,21 @@ bool ClassFlowPostProcessing::doFlow(string zwtime) {
                     if (digitMisread) {
                         // Revert integer part to PreValue, keep new decimal reading
                         double decPartValue = NUMBERS[j]->Value - (double)intPartValue;
-                        NUMBERS[j]->Value = (double)intPartPre + decPartValue;
+                        double correctedValue = (double)intPartPre + decPartValue;
+
+                        // Guard: if reverting the integer part causes a value below PreValue
+                        // (e.g. decimal wrapped from .99 to .03 while integer was blocked),
+                        // keep PreValue instead to avoid negative rate
+                        if (correctedValue < NUMBERS[j]->PreValue) {
+                            NUMBERS[j]->Value = NUMBERS[j]->PreValue;
+                            LogFile.WriteToFile(ESP_LOG_INFO, TAG, NUMBERS[j]->name +
+                                ": Digit stabilization would cause negative rate (" +
+                                to_string(correctedValue) + " < pre=" + to_string(NUMBERS[j]->PreValue) +
+                                "), keeping PreValue");
+                        }
+                        else {
+                            NUMBERS[j]->Value = correctedValue;
+                        }
                         NUMBERS[j]->ReturnValue = RundeOutput(NUMBERS[j]->Value, NUMBERS[j]->Nachkomma);
                     }
                 }
