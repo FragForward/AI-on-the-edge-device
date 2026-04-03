@@ -95,7 +95,25 @@ Uses the existing `ctrl/set_prevalue` MQTT handler on the ESP.
 
 ---
 
-### 5. Additional Bug Fixes
+### 5. Digit Rollover Stabilization
+
+CNN-based digit recognition can oscillate between two values (e.g. reading "3" one round and "2" the next) when a digit is mid-transition. This causes the published meter value to jump back and forth.
+
+**Fix:** A state machine tracks digit rollovers using the analog pointer as confirmation:
+- A digit change (+1) is only accepted when its **predecessor** (analog pointer or lower digit) has `result_float < 2.0`, confirming the 9→0 transition completed
+- After acceptance, further rollovers are blocked until the analog pointer reaches >= 5.0 (stability confirmation)
+- If the analog pointer completes a full revolution between readings (passing through 5.0 without being observed), the next rollover is still accepted when the predecessor confirms it
+
+**Example from real log data:**
+```
+Raw: 01393, PreValue: 1392, analog[0]=0.288
+--> Ones digit 2->3: analog=0.288 < 2.0 confirms rollover ✓
+--> Value accepted: 1393
+```
+
+---
+
+### 6. Additional Bug Fixes
 
 - **Fixed:** "Neg. Rate" error message was missing the actual read value (used undefined variable `zwvalue` - always showed empty string)
 - **Fixed:** `checkDigitConsistency()` could crash with `log10(0)` when input value was zero or negative
@@ -116,14 +134,16 @@ For first-time setup, see the [original documentation](https://jomjol.github.io/
 
 ## Changed Files
 
-Only 4 files were modified (186 lines added, 13 removed):
+6 files were modified (280 lines added, 125 removed):
 
 | File | Changes |
 |------|---------|
-| `code/components/jomjol_flowcontroll/ClassFlowPostProcessing.cpp` | JSON extension, rollover fix, bug fixes |
+| `code/components/jomjol_flowcontroll/ClassFlowPostProcessing.cpp` | JSON extension, rollover fix, digit stabilization, bug fixes |
+| `code/components/jomjol_flowcontroll/ClassFlowPostProcessing.h` | AnalogToDigitTransitionStart getter |
+| `code/components/jomjol_flowcontroll/ClassFlowDefineTypes.h` | Digit rollover state tracking fields |
 | `code/components/jomjol_flowcontroll/ClassFlowMQTT.cpp` | Individual ROI MQTT topics, image URL publishing |
 | `code/components/jomjol_mqtt/server_mqtt.cpp` | HA Discovery for ROIs, image entity, prevalue number entity |
-| `README.md` | This file |
+| `code/components/jomjol_mqtt/server_mqtt.h` | Discovery function declaration |
 
 ---
 
