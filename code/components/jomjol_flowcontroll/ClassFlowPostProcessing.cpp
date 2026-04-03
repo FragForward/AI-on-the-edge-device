@@ -1034,14 +1034,25 @@ bool ClassFlowPostProcessing::doFlow(string zwtime) {
                             if (digitDiff == 1) {
                                 // Forward +1 change (rollover candidate)
                                 if (NUMBERS[j]->digitRolloverPending) {
-                                    // Previous rollover not yet confirmed - block this one
-                                    digitMisread = true;
-                                    LogFile.WriteToFile(ESP_LOG_INFO, TAG, NUMBERS[j]->name +
-                                        ": Digit rollover blocked at pos " + to_string(d) + " (" +
-                                        to_string(digitPre) + " -> " + to_string(digitValue) +
-                                        ") - previous rollover not yet confirmed (analog=" +
-                                        to_string(analogValue) + " < 5.0)");
-                                    break;
+                                    if (predecessorFloat < 2.0) {
+                                        // Predecessor confirms this rollover too (analog completed full revolution)
+                                        // Accept the rollover, keep pending state
+                                        LogFile.WriteToFile(ESP_LOG_INFO, TAG, NUMBERS[j]->name +
+                                            ": Digit rollover at pos " + to_string(d) + " (" +
+                                            to_string(digitPre) + " -> " + to_string(digitValue) +
+                                            ") accepted despite pending state - " + predecessorName + "=" +
+                                            to_string(predecessorFloat) + " < 2.0 confirms full revolution");
+                                    }
+                                    else {
+                                        // Previous rollover not yet confirmed AND predecessor doesn't confirm - block
+                                        digitMisread = true;
+                                        LogFile.WriteToFile(ESP_LOG_INFO, TAG, NUMBERS[j]->name +
+                                            ": Digit rollover blocked at pos " + to_string(d) + " (" +
+                                            to_string(digitPre) + " -> " + to_string(digitValue) +
+                                            ") - previous rollover not yet confirmed (analog=" +
+                                            to_string(analogValue) + " < 5.0)");
+                                        break;
+                                    }
                                 }
                                 else if (predecessorFloat >= 2.0) {
                                     // Predecessor NOT in post-rollover zone -> digit misread
